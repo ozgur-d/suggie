@@ -5,8 +5,12 @@
   "version": "0.1.0",
   "publisher": "ozgur-duyar",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ozgur-d/suggie.git"
+  },
   "engines": {
-    "vscode": "^1.75.0"
+    "vscode": "^1.116.0"
   },
   "categories": [
     "Programming Languages",

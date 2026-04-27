@@ -4,9 +4,14 @@ node_modules/
 .specify/
 specs/
 .claude/
+.github/
+.vscode/
 .eslintrc.json
 tsconfig.json
 esbuild.mjs
 *.map
+*.log
+*.vsix
 .gitignore
 .vscode-test/
+CLAUDE.md
