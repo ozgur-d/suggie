@@ -23,7 +23,6 @@ jobs:
       - run: npm run build
 
       - run: npx @vscode/vsce package --no-dependencies
-        id: package
 
       - name: Get vsix filename
         id: vsix
@@ -34,3 +33,8 @@ jobs:
         with:
           generate_release_notes: true
           files: ${{ steps.vsix.outputs.file }}
+
+      - name: Publish to VS Code Marketplace
+        run: npx @vscode/vsce publish --no-dependencies
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
