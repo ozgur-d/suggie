@@ -1,0 +1,102 @@
+{
+  "name": "suggie",
+  "displayName": "Suggie",
+  "description": "A VS Code extension that turns your local Claude Code CLI into context-aware inline code suggestions.",
+  "version": "0.1.0",
+  "publisher": "ozgur-duyar",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Machine Learning"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "suggie.toggle",
+        "title": "Suggie: Toggle"
+      },
+      {
+        "command": "suggie.triggerCompletion",
+        "title": "Suggie: Trigger Completion"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "suggie.triggerCompletion",
+        "key": "ctrl+alt+i",
+        "mac": "cmd+alt+i",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "Suggie",
+      "properties": {
+        "suggie.model": {
+          "type": "string",
+          "default": "sonnet",
+          "enum": [
+            "haiku",
+            "sonnet",
+            "opus"
+          ],
+          "enumDescriptions": [
+            "Fast — shorter completions, lowest latency",
+            "Balanced — default for most coding tasks",
+            "Accurate — complex logic, longer multi-line generation"
+          ],
+          "description": "Model tier for inline completions"
+        },
+        "suggie.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable inline completions"
+        },
+        "suggie.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to the Claude Code CLI binary (leave empty to auto-detect from PATH)"
+        },
+        "suggie.excludePatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            ".env",
+            "*.key",
+            "*.pem",
+            "*credentials*",
+            "*.secret"
+          ],
+          "description": "Glob patterns for files excluded from context collection"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "lint": "eslint src/",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^25.6.0",
+    "@types/vscode": "^1.116.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.1",
+    "@typescript-eslint/parser": "^8.59.1",
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.28.0",
+    "eslint": "^10.2.1",
+    "mocha": "^11.7.5",
+    "typescript": "^6.0.3"
+  }
+}

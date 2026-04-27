@@ -1,0 +1,15 @@
+node_modules/
+out/
+dist/
+*.vsix
+.vscode-test/
+*.log
+.env*
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.claude/
+.specify/
+specs/
+CLAUDE.md

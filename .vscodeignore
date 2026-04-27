@@ -1,0 +1,12 @@
+src/
+test/
+node_modules/
+.specify/
+specs/
+.claude/
+.eslintrc.json
+tsconfig.json
+esbuild.mjs
+*.map
+.gitignore
+.vscode-test/
