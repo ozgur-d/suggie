@@ -2,7 +2,8 @@
   "name": "suggie",
   "displayName": "Suggie",
   "description": "A VS Code extension that turns your local Claude Code CLI into context-aware inline code suggestions.",
-  "version": "0.1.1",
+  "version": "0.1.2",
+  "icon": "images/icon.png",
   "publisher": "ozdyco",
   "license": "MIT",
   "repository": {
