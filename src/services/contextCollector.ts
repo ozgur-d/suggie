@@ -46,8 +46,8 @@ export class ContextCollector {
       };
     }
 
-    const startLine = Math.max(0, position.line - 80);
-    const endLine = Math.min(document.lineCount - 1, position.line + 10);
+    const startLine = Math.max(0, position.line - 30);
+    const endLine = Math.min(document.lineCount - 1, position.line + 8);
     const range = new vscode.Range(
       startLine,
       0,
@@ -84,7 +84,7 @@ export class ContextCollector {
         if (!openDoc) continue;
 
         const lineCount = openDoc.lineCount;
-        const maxLines = 30;
+        const maxLines = 15;
         const endLine = Math.min(lineCount - 1, maxLines - 1);
         const range = new vscode.Range(
           0,

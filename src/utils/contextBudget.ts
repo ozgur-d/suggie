@@ -1,7 +1,7 @@
 import { ContextPayload } from '../models/types';
 
 const CHARS_PER_TOKEN_ESTIMATE = 4;
-const DEFAULT_MAX_TOKENS = 8000;
+const DEFAULT_MAX_TOKENS = 3000;
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN_ESTIMATE);

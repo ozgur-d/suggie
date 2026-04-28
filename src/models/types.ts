@@ -1,10 +1,15 @@
-export type ModelTier = 'haiku' | 'sonnet' | 'opus';
+export type ModelTier = "haiku" | "sonnet" | "opus";
 
-export type TriggerKind = 'automatic' | 'invoke';
+export type TriggerKind = "automatic" | "invoke";
 
-export type RequestStatus = 'pending' | 'in_flight' | 'completed' | 'cancelled' | 'failed';
+export type RequestStatus =
+  | "pending"
+  | "in_flight"
+  | "completed"
+  | "cancelled"
+  | "failed";
 
-export type FeedbackAction = 'accepted' | 'rejected' | 'dismissed';
+export type FeedbackAction = "accepted" | "rejected" | "dismissed";
 
 export interface FileContext {
   uri: string;
@@ -51,8 +56,8 @@ export interface ModelConfig {
   timeoutMs: number;
 }
 
-export const MODEL_CONFIGS: Record<ModelTier, Omit<ModelConfig, 'model'>> = {
-  haiku: { debounceMs: 150, timeoutMs: 15000 },
-  sonnet: { debounceMs: 300, timeoutMs: 30000 },
+export const MODEL_CONFIGS: Record<ModelTier, Omit<ModelConfig, "model">> = {
+  haiku: { debounceMs: 300, timeoutMs: 15000 },
+  sonnet: { debounceMs: 400, timeoutMs: 30000 },
   opus: { debounceMs: 500, timeoutMs: 60000 },
 };

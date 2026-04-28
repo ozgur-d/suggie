@@ -3,6 +3,7 @@ import { CliService } from './services/cliService';
 import { SessionState } from './services/sessionState';
 import { ContextCollector } from './services/contextCollector';
 import { ContextPrimingService } from './services/contextPrimingService';
+import { CompletionCache } from './services/completionCache';
 import { InlineCompletionProvider } from './providers/inlineCompletionProvider';
 import { ConfigurationManager } from './models/configuration';
 import { Debouncer } from './utils/debouncer';
@@ -125,6 +126,8 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   };
 
+  const completionCache = new CompletionCache();
+
   const provider = new InlineCompletionProvider(
     cliService,
     debouncer,
@@ -132,7 +135,8 @@ export async function activate(context: vscode.ExtensionContext) {
     onStatusChange,
     contextCollector,
     sessionState,
-    primingService
+    primingService,
+    completionCache
   );
 
   // Detect CLI at activation
@@ -143,8 +147,8 @@ export async function activate(context: vscode.ExtensionContext) {
   } else if (!config.isEnabled()) {
     updateStatusBar('disabled', config);
   } else {
-    registerProvider(context, provider);
     primingService.startTracking();
+    registerProvider(context, provider);
     updateStatusBar('active', config);
   }
 

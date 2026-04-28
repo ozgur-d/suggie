@@ -2,17 +2,21 @@ import * as vscode from 'vscode';
 import { CliService } from '../services/cliService';
 import { ContextCollector } from '../services/contextCollector';
 import { ContextPrimingService } from '../services/contextPrimingService';
+import { CompletionCache } from '../services/completionCache';
 import { SessionState } from '../services/sessionState';
 import { Debouncer } from '../utils/debouncer';
-import { ModelTier, MODEL_CONFIGS, FileContext, EditEntry, FileSwitchEntry } from '../models/types';
+import { ModelTier, FileContext } from '../models/types';
 
 export type StatusCallback = (loading: boolean) => void;
 
 const TRIGGER_CHARS = new Set(['.', ';', '{', '}', '(', ')', ',', ':', ' ', '\t']);
+const CACHE_BEFORE_CHARS = 400;
+const CACHE_AFTER_CHARS = 200;
+const LIGHT_BEFORE_LINES = 4;
+const LIGHT_AFTER_LINES = 2;
 
 export class InlineCompletionProvider implements vscode.InlineCompletionItemProvider {
   private lastRequestId: string | null = null;
-  private lastResultCache: { uri: string; line: number; hash: string; items: vscode.InlineCompletionItem[] } | null = null;
 
   constructor(
     private cliService: CliService,
@@ -21,7 +25,8 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
     private onStatusChange: StatusCallback,
     private contextCollector?: ContextCollector,
     private sessionState?: SessionState,
-    private primingService?: ContextPrimingService
+    private primingService?: ContextPrimingService,
+    private cache?: CompletionCache
   ) {}
 
   setContextCollector(collector: ContextCollector): void {
@@ -45,7 +50,6 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
     const isManualTrigger =
       context.triggerKind === vscode.InlineCompletionTriggerKind.Invoke;
 
-    // Smart trigger: skip mid-word for automatic triggers
     if (!isManualTrigger) {
       const lineText = document.lineAt(position.line).text;
       const charBefore = position.character > 0 ? lineText[position.character - 1] : '';
@@ -59,42 +63,37 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
       if (!isAtBreakpoint && /\w/.test(charBefore) && !/\s/.test(charAfter || ' ')) {
         return [];
       }
+    }
 
-      // Dedup guard: return cached result if same position and content
-      const contentHash = document.getText(
-        new vscode.Range(
-          Math.max(0, position.line - 3), 0,
-          Math.min(document.lineCount - 1, position.line + 1),
-          document.lineAt(Math.min(document.lineCount - 1, position.line + 1)).text.length
-        )
-      );
-      const hash = `${contentHash.length}:${contentHash.slice(-200)}`;
-      if (
-        this.lastResultCache &&
-        this.lastResultCache.uri === document.uri.toString() &&
-        this.lastResultCache.line === position.line &&
-        this.lastResultCache.hash === hash
-      ) {
-        return this.lastResultCache.items;
+    // Build cache key once
+    const cacheKey = this.buildCacheKey(document, position);
+
+    // Cache lookup (works for both manual and auto triggers)
+    if (this.cache) {
+      const hit = this.cache.get(cacheKey);
+      if (hit) {
+        const requestId = `cache_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        this.lastRequestId = requestId;
+        return [this.makeItem(hit, position, requestId)];
       }
     }
 
+    if (!isManualTrigger && this.cliService.isBusy(this.getModel())) {
+      return [];
+    }
+
     const doCompletion = async (): Promise<vscode.InlineCompletionItem[]> => {
-      if (token.isCancellationRequested) {
-        return [];
-      }
+      if (token.isCancellationRequested) return [];
 
       this.onStatusChange(true);
       try {
         const model = this.getModel();
-        const prompt = this.buildPromptForRequest(document, position);
-        const result = await this.cliService.spawnCompletion(prompt, model, token);
+        const prompt = this.buildPromptForRequest(document, position, isManualTrigger);
+        const rawResult = await this.cliService.spawnCompletion(prompt, model, token);
+        const result = rawResult ? this.normalizeCompletion(rawResult) : null;
 
-        if (!result || token.isCancellationRequested) {
-          return [];
-        }
+        if (!result || token.isCancellationRequested) return [];
 
-        // Mark previous suggestion as dismissed only when a new one replaces it
         if (this.lastRequestId && this.sessionState) {
           this.sessionState.recordFeedback(this.lastRequestId, 'dismissed', '');
         }
@@ -102,34 +101,11 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
         const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         this.lastRequestId = requestId;
 
-        const acceptCommand: vscode.Command = {
-          command: 'suggie.acceptedCompletion',
-          title: '',
-          arguments: [requestId, result],
-        };
+        if (this.cache) {
+          this.cache.set(cacheKey, result);
+        }
 
-        const item = new vscode.InlineCompletionItem(
-          result,
-          new vscode.Range(position, position),
-          acceptCommand
-        );
-
-        const items = [item];
-        const contentHash = document.getText(
-          new vscode.Range(
-            Math.max(0, position.line - 3), 0,
-            Math.min(document.lineCount - 1, position.line + 1),
-            document.lineAt(Math.min(document.lineCount - 1, position.line + 1)).text.length
-          )
-        );
-        this.lastResultCache = {
-          uri: document.uri.toString(),
-          line: position.line,
-          hash: `${contentHash.length}:${contentHash.slice(-200)}`,
-          items,
-        };
-
-        return items;
+        return [this.makeItem(result, position, requestId)];
       } catch {
         return [];
       } finally {
@@ -141,19 +117,60 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
       return doCompletion();
     }
 
-    // Automatic trigger — debounce
     const result = await this.debouncer.trigger(doCompletion);
     return result ?? [];
   }
 
-  private buildPromptForRequest(
+  private makeItem(
+    text: string,
+    position: vscode.Position,
+    requestId?: string
+  ): vscode.InlineCompletionItem {
+    const acceptCommand: vscode.Command | undefined = requestId
+      ? {
+          command: 'suggie.acceptedCompletion',
+          title: '',
+          arguments: [requestId, text],
+        }
+      : undefined;
+    return new vscode.InlineCompletionItem(
+      text,
+      new vscode.Range(position, position),
+      acceptCommand
+    );
+  }
+
+  private buildCacheKey(
     document: vscode.TextDocument,
     position: vscode.Position
   ): string {
-    const isPrimed = this.primingService?.isFilePrimed(document.uri.toString());
+    const beforeStart = document.offsetAt(position) - CACHE_BEFORE_CHARS;
+    const beforeRange = new vscode.Range(
+      document.positionAt(Math.max(0, beforeStart)),
+      position
+    );
+    const afterEnd = document.offsetAt(position) + CACHE_AFTER_CHARS;
+    const afterRange = new vscode.Range(
+      position,
+      document.positionAt(afterEnd)
+    );
+    const before = document.getText(beforeRange);
+    const after = document.getText(afterRange);
+    return this.cache
+      ? this.cache.buildKey(document.uri.toString(), position.line, position.character, before, after)
+      : '';
+  }
 
-    if (isPrimed) {
-      return this.buildLightweightPrompt(document, position);
+  private buildPromptForRequest(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    isManualTrigger: boolean
+  ): string {
+    const isPrimed = this.primingService?.isFilePrimed(document.uri.toString());
+    const model = this.getModel();
+
+    if (!isManualTrigger || (isPrimed && this.cliService.isAnyWorkerPrimed(model))) {
+      return this.buildLightweightPrompt(document, position, isManualTrigger);
     }
 
     if (this.contextCollector) {
@@ -171,8 +188,8 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
       );
     }
 
-    const startLine = Math.max(0, position.line - 80);
-    const endLine = Math.min(document.lineCount - 1, position.line + 10);
+    const startLine = Math.max(0, position.line - 30);
+    const endLine = Math.min(document.lineCount - 1, position.line + 8);
     const content = document.getText(
       new vscode.Range(startLine, 0, endLine, document.lineAt(endLine).text.length)
     );
@@ -190,39 +207,35 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
 
   private buildLightweightPrompt(
     document: vscode.TextDocument,
-    position: vscode.Position
+    position: vscode.Position,
+    isManualTrigger: boolean = false
   ): string {
     const relativePath = vscode.workspace.asRelativePath(document.uri);
-    const beforeStart = Math.max(0, position.line - 15);
-    const afterEnd = Math.min(document.lineCount - 1, position.line + 5);
+    const beforeStart = Math.max(0, position.line - LIGHT_BEFORE_LINES);
+    const afterEnd = Math.min(document.lineCount - 1, position.line + LIGHT_AFTER_LINES);
+    const vicinity: string[] = [];
 
-    const linesBefore = [];
-    for (let i = beforeStart; i < position.line; i++) {
-      linesBefore.push(document.lineAt(i).text);
+    for (let i = beforeStart; i <= afterEnd; i++) {
+      const text = document.lineAt(i).text;
+      if (i === position.line) {
+        vicinity.push(`L${i + 1}: ${text.slice(0, position.character)}[CURSOR]${text.slice(position.character)}`);
+      } else {
+        vicinity.push(`L${i + 1}: ${text}`);
+      }
     }
 
-    const linesAfter = [];
-    for (let i = position.line; i <= afterEnd; i++) {
-      linesAfter.push(document.lineAt(i).text);
+    // Auto-trigger: ultra-terse so the cached prime stays the dominant
+    // prompt-cache prefix. Manual trigger keeps feedback hints.
+    let prompt = `[C] ${relativePath} L${position.line + 1}:C${position.character} ${document.languageId}\n`;
+    prompt += vicinity.join('\n');
+    prompt += '\nInsert at [CURSOR].';
+
+    if (isManualTrigger) {
+      const feedbackSummary = this.buildFeedbackSummary();
+      if (feedbackSummary) {
+        prompt += `\n${feedbackSummary}`;
+      }
     }
-
-    const currentLineText = document.lineAt(position.line).text;
-    const feedbackSummary = this.buildFeedbackSummary();
-
-    let prompt = `[COMPLETE] ${relativePath} L${position.line}:C${position.character} (${document.languageId})\n`;
-    prompt += `You already have the full content of this file from a previous CONTEXT PRIME message.\n\n`;
-    prompt += `--- Cursor vicinity ---\n`;
-    prompt += linesBefore.join('\n');
-    prompt += '\n[CURSOR]\n';
-    prompt += linesAfter.join('\n');
-    prompt += `\n--- End ---\n`;
-    prompt += `Current line: "${currentLineText}"\n`;
-
-    if (feedbackSummary) {
-      prompt += `\n${feedbackSummary}\n`;
-    }
-
-    prompt += '\nInsert code at [CURSOR].';
     return prompt;
   }
 
@@ -234,18 +247,35 @@ export class InlineCompletionProvider implements vscode.InlineCompletionItemProv
 
     const accepted = feedback
       .filter((f) => f.action === 'accepted')
-      .map((f) => f.insertedText.slice(0, 80));
+      .slice(-3)
+      .map((f) => this.shortFeedbackText(f.insertedText));
     const rejected = feedback
       .filter((f) => f.action === 'rejected')
-      .map((f) => f.insertedText.slice(0, 80));
+      .slice(-3)
+      .map((f) => this.shortFeedbackText(f.insertedText));
 
     const parts: string[] = [];
     if (accepted.length > 0) {
-      parts.push(`Accepted patterns:\n${accepted.join('\n')}`);
+      parts.push(`accepted=${accepted.join(' | ')}`);
     }
     if (rejected.length > 0) {
-      parts.push(`Rejected patterns:\n${rejected.join('\n')}`);
+      parts.push(`rejected=${rejected.join(' | ')}`);
     }
-    return parts.join('\n\n');
+    return parts.length > 0 ? `Feedback: ${parts.join('; ')}` : '';
+  }
+
+  private shortFeedbackText(text: string): string {
+    return text.replace(/\s+/g, ' ').trim().slice(0, 80);
+  }
+
+  private normalizeCompletion(text: string): string {
+    const trimmed = text.trim();
+    if (!trimmed || trimmed === 'OK') return '';
+
+    return text
+      .replace(/^\s*```[\w-]*\r?\n/, '')
+      .replace(/\r?\n```\s*$/, '')
+      .replace(/\r/g, '')
+      .replace(/\s+$/, '');
   }
 }
